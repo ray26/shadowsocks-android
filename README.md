@@ -8,8 +8,7 @@ Help to translate shadowsocks: http://crowdin.net/project/shadowsocks/invite
 
 ### CI STATUS
 
-[![Build Status](https://drone.io/github.com/shadowsocks/shadowsocks-android/status.png)](https://drone.io/github.com/shadowsocks/shadowsocks-android/latest)
-
+[![Build Status](https://drone.io/github.com/ray26/shadowsocks-android/status.png)](https://drone.io/github.com/ray26/shadowsocks-android/latest)
 ### PREREQUISITES
 
 * JDK 1.7+
