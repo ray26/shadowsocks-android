@@ -205,6 +205,8 @@ class ShadowsocksNatService extends Service with BaseService {
           , "-c" , Path.BASE + "ss-local-nat.conf"
           , "-f" , Path.BASE + "ss-local-nat.pid")
 
+    if (config.isAuth) cmd += "-A"
+
     if (config.route != Route.ALL) {
       cmd += "--acl"
       cmd += (Path.BASE + "acl.list")
@@ -233,6 +235,8 @@ class ShadowsocksNatService extends Service with BaseService {
 
       cmd += ("-l" , "8153")
 
+      if (config.isAuth) cmd += "-A"
+
       if (BuildConfig.DEBUG) Log.d(TAG, cmd.mkString(" "))
 
       Console.runCommand(cmd.mkString(" "))
@@ -254,6 +258,8 @@ class ShadowsocksNatService extends Service with BaseService {
         , "-c" , Path.BASE + "ss-tunnel-nat.conf"
         , "-f" , Path.BASE + "ss-tunnel-nat.pid")
 
+      if (config.isAuth) cmdBuf += "-A"
+
       if (BuildConfig.DEBUG) Log.d(TAG, cmdBuf.mkString(" "))
       Console.runCommand(cmdBuf.mkString(" "))
     }
@@ -265,10 +271,10 @@ class ShadowsocksNatService extends Service with BaseService {
       val reject = ConfigUtils.getRejectList(getContext, application)
       val blackList = ConfigUtils.getBlackList(getContext, application)
       ConfigUtils.PDNSD_DIRECT.formatLocal(Locale.ENGLISH, "127.0.0.1", 8153,
-        Path.BASE + "pdnsd-nat.pid", reject, blackList, 8163)
+        Path.BASE + "pdnsd-nat.pid", reject, blackList, 8163, "")
     } else {
       ConfigUtils.PDNSD_LOCAL.formatLocal(Locale.ENGLISH, "127.0.0.1", 8153,
-        Path.BASE + "pdnsd-nat.pid", 8163)
+        Path.BASE + "pdnsd-nat.pid", 8163, "")
     }
 
     ConfigUtils.printToFile(new File(Path.BASE + "pdnsd-nat.conf"))(p => {
