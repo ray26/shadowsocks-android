@@ -7,7 +7,7 @@ script:
    - git submodule update
    - echo "deb http://dl.bintray.com/sbt/debian /" | sudo tee -a /etc/apt/sources.list.d/sbt.list
    - sudo apt-get update
-   - sudo apt-get install -y ccache sbt
+   - sudo apt-get install --force-yes ccache sbt
    - export NDK_CCACHE=ccache
    - export ARCH=`uname -m`
    - export ANDROID_NDK_HOME=`pwd`/android-ndk-r10d
