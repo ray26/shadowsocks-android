@@ -2,7 +2,8 @@ language: scala
 scala:
    - 2.9.3
 script: 
-   - sudo apt-get install java-1.7.0-openjdk-amd64
+   - sudo apt-get update
+   - sudo apt-get install java-1.7.0-openjdk
    - git submodule init
    - git submodule update
    - echo "deb http://dl.bintray.com/sbt/debian /" | sudo tee -a /etc/apt/sources.list.d/sbt.list
