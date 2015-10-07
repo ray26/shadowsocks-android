@@ -47,17 +47,18 @@ import android.content._
 import android.content.pm.{PackageInfo, PackageManager}
 import android.net.VpnService
 import android.os._
+import android.support.v4.app.NotificationCompat
 import android.util.Log
 import android.widget.Toast
 import com.github.shadowsocks.aidl.Config
 import com.github.shadowsocks.utils._
 import com.google.android.gms.analytics.HitBuilders
 import org.apache.commons.net.util.SubnetUtils
-import org.apache.http.conn.util.InetAddressUtils
 
 import scala.collection.mutable
 import scala.collection.mutable.ArrayBuffer
-import scala.concurrent.ops._
+import scala.concurrent.ExecutionContext.Implicits.global
+import scala.concurrent.Future
 
 class ShadowsocksVpnService extends VpnService with BaseService {
 
@@ -67,11 +68,10 @@ class ShadowsocksVpnService extends VpnService with BaseService {
   val PRIVATE_VLAN = "26.26.26.%s"
   val PRIVATE_VLAN6 = "fdfe:dcba:9876::%s"
   var conn: ParcelFileDescriptor = null
-  var notificationManager: NotificationManager = null
-  var receiver: BroadcastReceiver = null
   var apps: Array[ProxiedApp] = null
   var config: Config = null
   var vpnThread: ShadowsocksVpnThread = null
+  var closeReceiver: BroadcastReceiver = null
 
   def isByass(net: SubnetUtils): Boolean = {
     val info = net.getInfo
@@ -104,15 +104,34 @@ class ShadowsocksVpnService extends VpnService with BaseService {
     null
   }
 
+  def notifyForegroundAlert(title: String, info: String, visible: Boolean) {
+    val openIntent = new Intent(this, classOf[Shadowsocks])
+    val contentIntent = PendingIntent.getActivity(this, 0, openIntent, 0)
+    val closeIntent = new Intent(Action.CLOSE)
+    val actionIntent = PendingIntent.getBroadcast(this, 0, closeIntent, 0)
+    val builder = new NotificationCompat.Builder(this)
+
+    builder
+      .setWhen(0)
+      .setTicker(title)
+      .setContentTitle(getString(R.string.app_name))
+      .setContentText(info)
+      .setContentIntent(contentIntent)
+      .setSmallIcon(R.drawable.ic_stat_shadowsocks)
+      .addAction(android.R.drawable.ic_menu_close_clear_cancel, getString(R.string.stop),
+        actionIntent)
+
+    if (visible)
+      builder.setPriority(NotificationCompat.PRIORITY_DEFAULT)
+    else
+      builder.setPriority(NotificationCompat.PRIORITY_MIN)
+
+    startForeground(1, builder.build)
+  }
+
   override def onCreate() {
-
     super.onCreate()
-
     ConfigUtils.refresh(this)
-
-    notificationManager = getSystemService(Context.NOTIFICATION_SERVICE)
-      .asInstanceOf[NotificationManager]
-
   }
 
   override def onRevoke() {
@@ -125,6 +144,8 @@ class ShadowsocksVpnService extends VpnService with BaseService {
       vpnThread.stopThread()
       vpnThread = null
     }
+
+    stopForeground(true)
 
     // channge the state
     changeState(State.STOPPING)
@@ -150,10 +171,10 @@ class ShadowsocksVpnService extends VpnService with BaseService {
       stopSelf()
     }
 
-    // clean up the context
-    if (receiver != null) {
-      unregisterReceiver(receiver)
-      receiver = null
+    // clean up recevier
+    if (closeReceiver != null) {
+      unregisterReceiver(closeReceiver)
+      closeReceiver = null
     }
 
     // channge the state
@@ -190,6 +211,16 @@ class ShadowsocksVpnService extends VpnService with BaseService {
 
     config = c
 
+    // register close receiver
+    val filter = new IntentFilter()
+    filter.addAction(Intent.ACTION_SHUTDOWN)
+    filter.addAction(Action.CLOSE)
+    closeReceiver = (context: Context, intent: Intent) => {
+      Toast.makeText(context, R.string.stopping, Toast.LENGTH_SHORT).show()
+      stopRunner()
+    }
+    registerReceiver(closeReceiver, filter)
+
     // ensure the VPNService is prepared
     if (VpnService.prepare(this) != null) {
       val i = new Intent(this, classOf[ShadowsocksRunnerActivity])
@@ -205,20 +236,9 @@ class ShadowsocksVpnService extends VpnService with BaseService {
       .setLabel(getVersionName)
       .build())
 
-    // register close receiver
-    val filter = new IntentFilter()
-    filter.addAction(Intent.ACTION_SHUTDOWN)
-    receiver = new BroadcastReceiver {
-      def onReceive(p1: Context, p2: Intent) {
-        Toast.makeText(p1, R.string.stopping, Toast.LENGTH_SHORT)
-        stopRunner()
-      }
-    }
-    registerReceiver(receiver, filter)
-
     changeState(State.CONNECTING)
 
-    spawn {
+    Future {
       if (config.proxy == "198.199.101.152") {
         val holder = getApplication.asInstanceOf[ShadowsocksApplication].containerHolder
         try {
@@ -238,8 +258,7 @@ class ShadowsocksVpnService extends VpnService with BaseService {
 
         // Resolve the server address
         var resolved: Boolean = false
-        if (!InetAddressUtils.isIPv4Address(config.proxy) &&
-          !InetAddressUtils.isIPv6Address(config.proxy)) {
+        if (!Utils.isNumeric(config.proxy)) {
           Utils.resolve(config.proxy, enableIPv6 = true) match {
             case Some(addr) =>
               config.proxy = addr
@@ -251,6 +270,8 @@ class ShadowsocksVpnService extends VpnService with BaseService {
         }
 
         if (resolved && handleConnection) {
+          notifyForegroundAlert(getString(R.string.forward_success),
+            getString(R.string.service_running).formatLocal(Locale.ENGLISH, config.profileName), false)
           changeState(State.CONNECTED)
         } else {
           changeState(State.STOPPED, getString(R.string.service_failed))
@@ -454,7 +475,7 @@ class ShadowsocksVpnService extends VpnService with BaseService {
 
     Console.runCommand(cmd)
 
-    return fd
+    fd
   }
 
   override def stopBackgroundService() {

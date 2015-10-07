@@ -41,6 +41,7 @@ package com.github.shadowsocks
 
 import java.io.File
 import java.lang.reflect.{InvocationTargetException, Method}
+import java.net.{Inet6Address, InetAddress}
 import java.util.Locale
 
 import android.app._
@@ -54,11 +55,11 @@ import android.widget.Toast
 import com.github.shadowsocks.aidl.Config
 import com.github.shadowsocks.utils._
 import com.google.android.gms.analytics.HitBuilders
-import org.apache.http.conn.util.InetAddressUtils
 
 import scala.collection._
 import scala.collection.mutable.ArrayBuffer
-import scala.concurrent.ops._
+import scala.concurrent.ExecutionContext.Implicits.global
+import scala.concurrent.Future
 
 class ShadowsocksNatService extends Service with BaseService {
 
@@ -68,24 +69,12 @@ class ShadowsocksNatService extends Service with BaseService {
   val CMD_IPTABLES_DNAT_ADD_SOCKS = " -t nat -A OUTPUT -p tcp " +
     "-j DNAT --to-destination 127.0.0.1:8123"
 
-  private val mStartForegroundSignature = Array[Class[_]](classOf[Int], classOf[Notification])
-  private val mStopForegroundSignature = Array[Class[_]](classOf[Boolean])
-  private val mSetForegroundSignature = Array[Class[_]](classOf[Boolean])
-  private val mSetForegroundArgs = new Array[AnyRef](1)
-  private val mStartForegroundArgs = new Array[AnyRef](2)
-  private val mStopForegroundArgs = new Array[AnyRef](1)
-
   var lockReceiver: BroadcastReceiver = null
   var closeReceiver: BroadcastReceiver = null
   var connReceiver: BroadcastReceiver = null
-  var notificationManager: NotificationManager = null
   var config: Config = null
   var apps: Array[ProxiedApp] = null
   val myUid = Process.myUid()
-
-  private var mSetForeground: Method = null
-  private var mStartForeground: Method = null
-  private var mStopForeground: Method = null
 
   private lazy val application = getApplication.asInstanceOf[ShadowsocksApplication]
 
@@ -172,11 +161,7 @@ class ShadowsocksNatService extends Service with BaseService {
 
   def initConnectionReceiver() {
     val filter = new IntentFilter(ConnectivityManager.CONNECTIVITY_ACTION)
-    connReceiver = new BroadcastReceiver {
-      override def onReceive(context: Context, intent: Intent) = {
-        setupDns()
-      }
-    }
+    connReceiver = (context: Context, intent: Intent) => setupDns()
     registerReceiver(connReceiver, filter)
   }
 
@@ -324,17 +309,6 @@ class ShadowsocksNatService extends Service with BaseService {
     true
   }
 
-  def invokeMethod(method: Method, args: Array[AnyRef]) {
-    try {
-      method.invoke(this, mStartForegroundArgs: _*)
-    } catch {
-      case e: InvocationTargetException =>
-        Log.w(TAG, "Unable to invoke method", e)
-      case e: IllegalAccessException =>
-        Log.w(TAG, "Unable to invoke method", e)
-    }
-  }
-
   def notifyForegroundAlert(title: String, info: String, visible: Boolean) {
     val openIntent = new Intent(this, classOf[Shadowsocks])
     openIntent.setFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
@@ -358,7 +332,7 @@ class ShadowsocksNatService extends Service with BaseService {
     else
       builder.setPriority(NotificationCompat.PRIORITY_MIN)
 
-    startForegroundCompat(1, builder.build)
+    startForeground(1, builder.build)
   }
 
   def onBind(intent: Intent): IBinder = {
@@ -372,29 +346,7 @@ class ShadowsocksNatService extends Service with BaseService {
 
   override def onCreate() {
     super.onCreate()
-
     ConfigUtils.refresh(this)
-
-    notificationManager = this
-      .getSystemService(Context.NOTIFICATION_SERVICE)
-      .asInstanceOf[NotificationManager]
-    try {
-      mStartForeground = getClass.getMethod("startForeground", mStartForegroundSignature: _*)
-      mStopForeground = getClass.getMethod("stopForeground", mStopForegroundSignature: _*)
-    } catch {
-      case e: NoSuchMethodException =>
-        mStartForeground = {
-          mStopForeground = null
-          mStopForeground
-        }
-    }
-    try {
-      mSetForeground = getClass.getMethod("setForeground", mSetForegroundSignature: _*)
-    } catch {
-      case e: NoSuchMethodException =>
-        throw new IllegalStateException(
-          "OS doesn't have Service.startForeground OR Service.setForeground!")
-    }
   }
 
   def killProcesses() {
@@ -430,7 +382,7 @@ class ShadowsocksNatService extends Service with BaseService {
     init_sb.append(Utils.getIptables + " -t nat -F OUTPUT")
 
     val cmd_bypass = Utils.getIptables + CMD_IPTABLES_RETURN
-    if (!InetAddressUtils.isIPv6Address(config.proxy.toUpperCase)) {
+    if (!InetAddress.getByName(config.proxy.toUpperCase).isInstanceOf[Inet6Address]) {
       init_sb.append(cmd_bypass.replace("-p tcp -d 0.0.0.0", "-d " + config.proxy))
     }
     init_sb.append(cmd_bypass.replace("-p tcp -d 0.0.0.0", "-d 127.0.0.1"))
@@ -465,44 +417,6 @@ class ShadowsocksNatService extends Service with BaseService {
     Console.runRootCommand(http_sb.toArray)
   }
 
-  /**
-   * This is a wrapper around the new startForeground method, using the older
-   * APIs if it is not available.
-   */
-  def startForegroundCompat(id: Int, notification: Notification) {
-    if (mStartForeground != null) {
-      mStartForegroundArgs(0) = int2Integer(id)
-      mStartForegroundArgs(1) = notification
-      invokeMethod(mStartForeground, mStartForegroundArgs)
-      return
-    }
-    mSetForegroundArgs(0) = boolean2Boolean(x = true)
-    invokeMethod(mSetForeground, mSetForegroundArgs)
-    notificationManager.notify(id, notification)
-  }
-
-  /**
-   * This is a wrapper around the new stopForeground method, using the older
-   * APIs if it is not available.
-   */
-  def stopForegroundCompat(id: Int) {
-    if (mStopForeground != null) {
-      mStopForegroundArgs(0) = boolean2Boolean(x = true)
-      try {
-        mStopForeground.invoke(this, mStopForegroundArgs: _*)
-      } catch {
-        case e: InvocationTargetException =>
-          Log.w(TAG, "Unable to invoke stopForeground", e)
-        case e: IllegalAccessException =>
-          Log.w(TAG, "Unable to invoke stopForeground", e)
-      }
-      return
-    }
-    notificationManager.cancel(id)
-    mSetForegroundArgs(0) = boolean2Boolean(x = false)
-    invokeMethod(mSetForeground, mSetForegroundArgs)
-  }
-
   override def startRunner(c: Config) {
 
     config = c
@@ -511,11 +425,9 @@ class ShadowsocksNatService extends Service with BaseService {
     val filter = new IntentFilter()
     filter.addAction(Intent.ACTION_SHUTDOWN)
     filter.addAction(Action.CLOSE)
-    closeReceiver = new BroadcastReceiver() {
-      def onReceive(context: Context, intent: Intent) {
-        Toast.makeText(context, R.string.stopping, Toast.LENGTH_SHORT).show()
-        stopRunner()
-      }
+    closeReceiver = (context: Context, intent: Intent) => {
+      Toast.makeText(context, R.string.stopping, Toast.LENGTH_SHORT).show()
+      stopRunner()
     }
     registerReceiver(closeReceiver, filter)
 
@@ -524,26 +436,22 @@ class ShadowsocksNatService extends Service with BaseService {
       screenFilter.addAction(Intent.ACTION_SCREEN_ON)
       screenFilter.addAction(Intent.ACTION_SCREEN_OFF)
       screenFilter.addAction(Intent.ACTION_USER_PRESENT)
-      lockReceiver = new BroadcastReceiver() {
-        def onReceive(context: Context, intent: Intent) {
-          if (getState == State.CONNECTED) {
-            val action = intent.getAction
-            if (action == Intent.ACTION_SCREEN_OFF) {
-              notifyForegroundAlert(getString(R.string.forward_success),
-                getString(R.string.service_running).formatLocal(Locale.ENGLISH, config.profileName), false)
-            } else if (action == Intent.ACTION_SCREEN_ON) {
-              val keyGuard = getSystemService(Context.KEYGUARD_SERVICE).asInstanceOf[KeyguardManager]
-              if (!keyGuard.inKeyguardRestrictedInputMode) {
-                notifyForegroundAlert(getString(R.string.forward_success),
-                  getString(R.string.service_running).formatLocal(Locale.ENGLISH, config.profileName), true)
-            }
-            } else if (action == Intent.ACTION_USER_PRESENT) {
-              notifyForegroundAlert(getString(R.string.forward_success),
-                getString(R.string.service_running).formatLocal(Locale.ENGLISH, config.profileName), true)
-            }
-            }
+      lockReceiver = (context: Context, intent: Intent) => if (getState == State.CONNECTED) {
+        val action = intent.getAction
+        if (action == Intent.ACTION_SCREEN_OFF) {
+          notifyForegroundAlert(getString(R.string.forward_success),
+            getString(R.string.service_running).formatLocal(Locale.ENGLISH, config.profileName), false)
+        } else if (action == Intent.ACTION_SCREEN_ON) {
+          val keyGuard = getSystemService(Context.KEYGUARD_SERVICE).asInstanceOf[KeyguardManager]
+          if (!keyGuard.inKeyguardRestrictedInputMode) {
+            notifyForegroundAlert(getString(R.string.forward_success),
+              getString(R.string.service_running).formatLocal(Locale.ENGLISH, config.profileName), true)
           }
+        } else if (action == Intent.ACTION_USER_PRESENT) {
+          notifyForegroundAlert(getString(R.string.forward_success),
+            getString(R.string.service_running).formatLocal(Locale.ENGLISH, config.profileName), true)
         }
+      }
         registerReceiver(lockReceiver, screenFilter)
     }
 
@@ -556,7 +464,7 @@ class ShadowsocksNatService extends Service with BaseService {
 
     changeState(State.CONNECTING)
 
-    spawn {
+    Future {
 
       if (config.proxy == "198.199.101.152") {
         val holder = application.containerHolder
@@ -576,8 +484,7 @@ class ShadowsocksNatService extends Service with BaseService {
         killProcesses()
 
         var resolved: Boolean = false
-        if (!InetAddressUtils.isIPv4Address(config.proxy) &&
-          !InetAddressUtils.isIPv6Address(config.proxy)) {
+        if (!Utils.isNumeric(config.proxy)) {
           Utils.resolve(config.proxy, enableIPv6 = true) match {
             case Some(a) =>
               config.proxy = a
@@ -637,7 +544,7 @@ class ShadowsocksNatService extends Service with BaseService {
       stopSelf()
     }
 
-    stopForegroundCompat(1)
+    stopForeground(true)
 
     // change the state
     changeState(State.STOPPED)

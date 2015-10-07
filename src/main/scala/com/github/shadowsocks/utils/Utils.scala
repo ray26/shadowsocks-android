@@ -38,22 +38,21 @@
  */
 package com.github.shadowsocks.utils
 
-import android.content.{Intent, Context}
-import android.content.pm.ApplicationInfo
-import android.content.pm.PackageManager
-import android.graphics.drawable.{BitmapDrawable, Drawable}
-import android.util.{Base64, Log}
 import java.io._
-import java.net.{UnknownHostException, InetAddress, NetworkInterface}
-import org.apache.http.conn.util.InetAddressUtils
-import org.xbill.DNS._
-import android.graphics._
+import java.net._
+import java.security.MessageDigest
+
 import android.app.ActivityManager
+import android.content.pm.{ApplicationInfo, PackageManager}
+import android.content.{Context, Intent}
+import android.graphics._
+import android.graphics.drawable.{BitmapDrawable, Drawable}
 import android.os.Build
 import android.provider.Settings
-import scala.Some
-import java.security.MessageDigest
-import com.github.shadowsocks.{BuildConfig}
+import android.support.v4.content.ContextCompat
+import android.util.{Base64, Log}
+import com.github.shadowsocks.BuildConfig
+import org.xbill.DNS._
 
 
 object Utils {
@@ -147,6 +146,7 @@ object Utils {
     //  + "am broadcast -a android.intent.action.AIRPLANE_MODE --ez state false\n")
   }
 
+  //noinspection ScalaDeprecation
   private def toggleBelowApiLevel17(context: Context) {
     // Android 4.2 below
     Settings.System.putInt(context.getContentResolver, Settings.System.AIRPLANE_MODE_ON, 1)
@@ -198,7 +198,7 @@ object Utils {
         }
       }
     } catch {
-      case e: Exception => None
+      case e: Exception =>
     }
     None
   }
@@ -233,6 +233,9 @@ object Utils {
     None
   }
 
+  private lazy val isNumericMethod = classOf[InetAddress].getMethod("isNumeric", classOf[String])
+  def isNumeric(address: String): Boolean = isNumericMethod.invoke(null, address).asInstanceOf[Boolean]
+
   /**
    * Get local IPv4 address
    */
@@ -245,9 +248,8 @@ object Utils {
         while (addrs.hasMoreElements) {
           val addr = addrs.nextElement()
           if (!addr.isLoopbackAddress && !addr.isLinkLocalAddress) {
-            val sAddr = addr.getHostAddress.toUpperCase
-            if (InetAddressUtils.isIPv4Address(sAddr)) {
-              return Some(sAddr)
+            if (addr.isInstanceOf[Inet4Address]) {
+              return Some(addr.getHostAddress.toUpperCase)
             }
           }
         }
@@ -271,8 +273,7 @@ object Utils {
         while (addrs.hasMoreElements) {
           val addr = addrs.nextElement()
           if (!addr.isLoopbackAddress && !addr.isLinkLocalAddress) {
-            val sAddr = addr.getHostAddress.toUpperCase
-            if (InetAddressUtils.isIPv6Address(sAddr)) {
+            if (addr.isInstanceOf[Inet6Address]) {
               if (BuildConfig.DEBUG) Log.d(TAG, "IPv6 address detected")
               return true
             }
@@ -338,7 +339,7 @@ object Utils {
 
   def getAppIcon(c: Context, packageName: String): Drawable = {
     val pm: PackageManager = c.getPackageManager
-    val icon: Drawable = c.getResources.getDrawable(android.R.drawable.sym_def_app_icon)
+    val icon: Drawable = ContextCompat.getDrawable(c, android.R.drawable.sym_def_app_icon)
     try {
       pm.getApplicationIcon(packageName)
     } catch {
@@ -348,7 +349,7 @@ object Utils {
 
   def getAppIcon(c: Context, uid: Int): Drawable = {
     val pm: PackageManager = c.getPackageManager
-    val icon: Drawable = c.getResources.getDrawable(android.R.drawable.sym_def_app_icon)
+    val icon: Drawable = ContextCompat.getDrawable(c, android.R.drawable.sym_def_app_icon)
     val packages: Array[String] = pm.getPackagesForUid(uid)
     if (packages != null) {
       if (packages.length >= 1) {
