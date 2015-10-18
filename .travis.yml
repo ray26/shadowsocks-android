@@ -1,26 +1,33 @@
 language: scala
 scala:
    - 2.9.3
-jdk:
-   - openjdk7
+
 script: 
-   - git submodule init
-   - git submodule update
-   - echo "deb http://dl.bintray.com/sbt/debian /" | sudo tee -a /etc/apt/sources.list.d/sbt.list
-   - sudo apt-get update
-   - sudo apt-get install --force-yes ccache sbt
-   - export NDK_CCACHE=ccache
-   - export ARCH=`uname -m`
-   - export ANDROID_NDK_HOME=`pwd`/android-ndk-r10d
-   - export ANDROID_HOME=`pwd`/android-sdk-linux
-   - export PATH=${ANDROID_NDK_HOME}:${ANDROID_HOME}/tools:${ANDROID_HOME}/platform-tools:${PATH}
-   - wget -q http://dl.google.com/android/android-sdk_r24.1.2-linux.tgz
-   - tar xf android-sdk_r24.1.2-linux.tgz
-   - echo "y" | android update sdk --filter tools,platform-tools,build-tools-21.0.1,android-21,extra-google-m2repository --no-ui -a
-   - echo "y" | android update sdk --filter extra-android-m2repository --no-ui -a
-   - wget -q http://dl.google.com/android/ndk/android-ndk-r10d-linux-${ARCH}.bin
-   - chmod +x android-ndk-r10d-linux-${ARCH}.bin
-   - ./android-ndk-r10d-linux-${ARCH}.bin -y &> /dev/null
-   - cp local.properties.travis local.properties
-   - ./build.sh
-   - sbt android:package-release
+sudo update-java-alternatives -s java-1.7.0-openjdk-amd64
+
+git submodule init
+git submodule update
+
+echo "deb http://dl.bintray.com/sbt/debian /" | sudo tee -a /etc/apt/sources.list.d/sbt.list
+sudo apt-get update
+sudo apt-get install -y ccache sbt
+
+export NDK_CCACHE=ccache
+export ARCH=`uname -m`
+export ANDROID_NDK_HOME=`pwd`/android-ndk-r10d
+export ANDROID_HOME=`pwd`/android-sdk-linux
+export PATH=${ANDROID_NDK_HOME}:${ANDROID_HOME}/tools:${ANDROID_HOME}/platform-tools:${PATH}
+
+wget -q http://dl.google.com/android/android-sdk_r24.3.4-linux.tgz
+tar xf android-sdk_r24.3.4-linux.tgz
+echo "y" | android update sdk --filter tools,platform-tools,build-tools-23.0.1,android-23,extra-google-m2repository --no-ui -a
+echo "y" | android update sdk --filter extra-android-m2repository --no-ui -a
+
+wget -q http://dl.google.com/android/ndk/android-ndk-r10d-linux-${ARCH}.bin
+chmod +x android-ndk-r10d-linux-${ARCH}.bin
+./android-ndk-r10d-linux-${ARCH}.bin -y &> /dev/null
+
+cp local.properties.travis local.properties
+./build.sh
+sbt android:package-release
+
