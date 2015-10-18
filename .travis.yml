@@ -1,7 +1,6 @@
 language: scala
 scala:
    - 2.9.3
-
 script: 
 sudo update-java-alternatives -s java-1.7.0-openjdk-amd64
 
@@ -30,4 +29,3 @@ chmod +x android-ndk-r10d-linux-${ARCH}.bin
 cp local.properties.travis local.properties
 ./build.sh
 sbt android:package-release
-
